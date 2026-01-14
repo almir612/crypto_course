@@ -6,12 +6,14 @@ networks:
 
 x-airflow-common: &airflow-common
   build: .
+  env_file:
+    - .env
   environment:
     PYTHONPATH: /opt/airflow
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres/${AIRFLOW_DB_NAME}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
   volumes:
     - ./dags:/opt/airflow/dags
@@ -29,14 +31,16 @@ services:
   postgres:
     image: postgres:15
     container_name: airflow-postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
+      POSTGRES_USER: ${AIRFLOW_DB_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+      POSTGRES_DB: ${AIRFLOW_DB_NAME}
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
+      test: ["CMD", "pg_isready", "-U", "${AIRFLOW_DB_USER}"]
       interval: 10s
       retries: 5
       start_period: 5s
@@ -50,7 +54,7 @@ services:
     command: >
       -c "
       airflow db init &&
-      airflow users create --username airflow --password airflow --firstname Airflow --lastname Admin --role Admin --email airflow@local
+      airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname Airflow --lastname Admin --role Admin --email ${AIRFLOW_ADMIN_EMAIL}
       "
     restart: "no"
     depends_on:
@@ -81,10 +85,14 @@ services:
     ports:
       - "8123:8123"
       - "9000:9000"
+    env_file:
+      - .env
     environment:
-      CLICKHOUSE_DB: crypto
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: devpass
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_USER: ${CLICKHOUSE_DEFAULT_USER}
+      CLICKHOUSE_DEFAULT_PASSWORD: ${CLICKHOUSE_DEFAULT_PASSWORD}
     volumes:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
       - clickhouse-data:/var/lib/clickhouse
@@ -94,14 +102,16 @@ services:
   superset-db:
     image: postgres:15
     container_name: superset-postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: superset
-      POSTGRES_USER: superset
-      POSTGRES_PASSWORD: superset
+      POSTGRES_DB: ${SUPERSET_DB_NAME}
+      POSTGRES_USER: ${SUPERSET_DB_USER}
+      POSTGRES_PASSWORD: ${SUPERSET_DB_PASSWORD}
     volumes:
       - superset-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "superset"]
+      test: ["CMD", "pg_isready", "-U", "${SUPERSET_DB_USER}"]
       interval: 10s
       retries: 5
       start_period: 5s
@@ -114,13 +124,15 @@ services:
     depends_on:
       superset-db:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
-      SUPERSET_SECRET_KEY: "supersecretkey"
-      DATABASE_URL: "postgresql+psycopg2://superset:superset@superset-db:5432/superset"
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      DATABASE_URL: postgresql+psycopg2://${SUPERSET_DB_USER}:${SUPERSET_DB_PASSWORD}@superset-db:5432/${SUPERSET_DB_NAME}
     volumes:
       - superset_home:/app/superset_home
     command: >
-      sh -c "pip install clickhouse-connect==0.7.6 && superset db upgrade && superset fab create-admin --username admin --password admin --firstname Admin --lastname User --email admin@superset.local && superset init"
+      sh -c "pip install clickhouse-connect==0.7.6 && superset db upgrade && superset fab create-admin --username ${SUPERSET_ADMIN_USER} --password ${SUPERSET_ADMIN_PASSWORD} --firstname Admin --lastname User --email ${SUPERSET_ADMIN_EMAIL} && superset init"
     restart: "no"
     networks:
       - data-platform
@@ -133,8 +145,10 @@ services:
     depends_on:
       superset-init:
         condition: service_completed_successfully
+    env_file:
+      - .env
     environment:
-      SUPERSET_SECRET_KEY: "supersecretkey"
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
     volumes:
       - superset_home:/app/superset_home
     command: superset run -h 0.0.0.0 -p 8088 --with-threads --reload
