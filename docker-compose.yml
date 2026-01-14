@@ -1,5 +1,9 @@
 version: "3.8"
 
+networks:
+  data-platform:
+    driver: bridge
+
 x-airflow-common: &airflow-common
   build: .
   environment:
@@ -18,6 +22,8 @@ x-airflow-common: &airflow-common
   depends_on:
     postgres:
       condition: service_healthy
+  networks:
+    - data-platform
 
 services:
   postgres:
@@ -34,6 +40,8 @@ services:
       interval: 10s
       retries: 5
       start_period: 5s
+    networks:
+      - data-platform
 
   airflow-init:
     <<: *airflow-common
@@ -80,7 +88,61 @@ services:
     volumes:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
       - clickhouse-data:/var/lib/clickhouse
+    networks:
+      - data-platform
+
+  superset-db:
+    image: postgres:15
+    container_name: superset-postgres
+    environment:
+      POSTGRES_DB: superset
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+    volumes:
+      - superset-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "superset"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    networks:
+      - data-platform
+
+  superset-init:
+    image: apache/superset:2.1.0
+    container_name: superset-init
+    depends_on:
+      superset-db:
+        condition: service_healthy
+    environment:
+      SUPERSET_SECRET_KEY: "supersecretkey"
+      DATABASE_URL: "postgresql+psycopg2://superset:superset@superset-db:5432/superset"
+    volumes:
+      - superset_home:/app/superset_home
+    command: >
+      sh -c "pip install clickhouse-connect==0.7.6 && superset db upgrade && superset fab create-admin --username admin --password admin --firstname Admin --lastname User --email admin@superset.local && superset init"
+    restart: "no"
+    networks:
+      - data-platform
+
+  superset:
+    image: apache/superset:2.1.0
+    container_name: superset
+    ports:
+      - "8088:8088"
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    environment:
+      SUPERSET_SECRET_KEY: "supersecretkey"
+    volumes:
+      - superset_home:/app/superset_home
+    command: superset run -h 0.0.0.0 -p 8088 --with-threads --reload
+    networks:
+      - data-platform
 
 volumes:
   postgres-db-volume:
   clickhouse-data:
+  superset_home:
+  superset-db-data:
